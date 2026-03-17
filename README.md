@@ -94,6 +94,8 @@ This version solves a **nonlinear** optimization problem with the nonlinear dyna
 - RViz markers:
   - `/ego_racecar/mpc_ref_traj`
   - `/ego_racecar/driven_traj`
+  - 
+Note: The script also has a functionality to switch to linear MPC using CasADi + IPOPT
 
 ### 2) `mpc_node_cvxpympc.py` - Linear MPC as a QP (CVXPY + OSQP)
 
@@ -125,20 +127,7 @@ It also publishes corridor markers:
 
 ---
 
-## ROS 2 topics (expected)
-
-- Subscribes:
-  - `/ego_racecar/odom` (`nav_msgs/msg/Odometry`)
-- Publishes:
-  - `/drive` (`ackermann_msgs/msg/AckermannDriveStamped`)
-  - RViz (`visualization_msgs/msg/Marker`):
-    - `/ego_racecar/mpc_ref_traj`
-    - `/ego_racecar/driven_traj`
-    - (corridor version) `/ego_racecar/corridor_left`, `/ego_racecar/corridor_right`
-
----
-
-## Waypoints / track data
+## Track data:
 
 All controllers use a CSV file:
 
