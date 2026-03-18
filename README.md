@@ -19,15 +19,15 @@ So the state vector is:
 
 **Inputs**
 - `a` = acceleration [m/s²]
-- `delta` (δ) = steering rate [rad/s]
+- `delta` (δ) = steering angle [rad]
 
 So the input vector is:
 
 - **u = [a, delta]ᵀ**
 
 **Constants**
-- `WB` = wheelbase L [m] (from `mpc_config.WB`)
-- `DTK` = time-step Δt [s] (from `mpc_config.DTK`)
+- `WB` = WheelBase L [m] (from `mpc_config.WB`)
+- `DTK` = Time-step Δt [s] (from `mpc_config.DTK`)
 
 ---
 
