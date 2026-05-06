@@ -25,8 +25,8 @@ from visualization_msgs.msg import Marker
 class mpc_config:
     NXK: int = 4  # length of kinematic state vector: z = [x, y, v, yaw]
     NU: int = 2  # length of input vector: u = = [steering speed, acceleration]
-    TK: int = 2 # finite time horizon length kinematic (2 × 0.2 s = 0.4 s)
-    k = 1
+    TK: int = 2 # finite time horizon length kinematic (2 x 0.2 s = 0.4 s)
+    
     
     Rk: list = field(
     default_factory=lambda: np.diag([
@@ -386,11 +386,11 @@ class MPC(Node):
 
     #Solve MPC (Depending on USE_NMPC flag)
         if self.USE_NMPC:
-            (self.oa, self.odelta_v, ox, oy, oyaw, ov) = self.nmpc_prob_solve(
+            (self.oa, self.odelta_v, ox, oy, oyaw) = self.nmpc_prob_solve(
                 ref_path, x0
             )
         else:
-            (self.oa, self.odelta_v, ox, oy, oyaw, ov, _) = self._linear_mpc_control(
+            (self.oa, self.odelta_v, ox, oy, oyaw, _) = self._linear_mpc_control(
                 ref_path, x0, self.oa, self.odelta_v
             )
 
@@ -408,8 +408,11 @@ class MPC(Node):
                 pass
             return
         steer_output = float(self.odelta_v[0])
-        if getattr(self, '_solve_ok', False) and ox is not None:
-            speed_output = float(np.clip(ov[1], self.config.MIN_SPEED, self.config.MAX_SPEED))
+        if getattr(self, '_solve_ok', False) and self.oa is not None:
+            raw_speed = vehicle_state.v + float(self.oa[0]) * self.config.DTK
+            floor     = max(self.config.MIN_SPEED,
+                            float(ref_v[self.target_ind]) - self.config.MAX_ACCEL * self.config.DTK)
+            speed_output = float(np.clip(raw_speed, floor, self.config.MAX_SPEED))
         else:
             speed_output = float(np.clip(ref_v[self.target_ind], self.config.MIN_SPEED, self.config.MAX_SPEED))
 
@@ -821,7 +824,7 @@ class MPC(Node):
         # always valid even if every fallback path fails.
         oa     = self.oa       if self.oa       is not None else np.zeros(self.config.TK)
         odelta = self.odelta_v if self.odelta_v is not None else np.zeros(self.config.TK)
-        ox = oy = oyaw = ov = None        
+        ox = oy = oyaw = None
         NX = self.config.NXK
         NU = self.config.NU
         T  = self.config.TK
@@ -843,7 +846,6 @@ class MPC(Node):
             sol    = self.opti.solve()
             ox     = np.array(sol.value(self.xk[0, :])).flatten()
             oy     = np.array(sol.value(self.xk[1, :])).flatten()
-            ov     = np.array(sol.value(self.xk[2, :])).flatten()
             oyaw   = np.array(sol.value(self.xk[3, :])).flatten()
             oa     = np.array(sol.value(self.uk[0, :])).flatten()
             odelta = np.array(sol.value(self.uk[1, :])).flatten()
@@ -860,7 +862,6 @@ class MPC(Node):
             try:
                 ox     = np.array(self.opti.debug.value(self.xk[0, :])).flatten()
                 oy     = np.array(self.opti.debug.value(self.xk[1, :])).flatten()
-                ov     = np.array(self.opti.debug.value(self.xk[2, :])).flatten()
                 oyaw   = np.array(self.opti.debug.value(self.xk[3, :])).flatten()
                 oa     = np.array(self.opti.debug.value(self.uk[0, :])).flatten()
                 odelta = np.array(self.opti.debug.value(self.uk[1, :])).flatten()
@@ -871,7 +872,7 @@ class MPC(Node):
                 print(f"LMPC: debug fallback failed ({e2}) — holding previous output")
                 # oa / odelta already set to carry-forward values above
 
-        return oa, odelta, ox, oy, oyaw, ov
+        return oa, odelta, ox, oy, oyaw
 
     ####################################################################################################
     def _linear_mpc_control(self, ref_path, x0, oa, od):
@@ -1020,7 +1021,6 @@ class MPC(Node):
             sol    = self.opti.solve()
             ox     = np.array(sol.value(self.xk[0, :])).flatten()
             oy     = np.array(sol.value(self.xk[1, :])).flatten()
-            ov     = np.array(sol.value(self.xk[2, :])).flatten()
             oyaw   = np.array(sol.value(self.xk[3, :])).flatten()
             oa     = np.array(sol.value(self.uk[0, :])).flatten()
             odelta = np.array(sol.value(self.uk[1, :])).flatten()
@@ -1033,7 +1033,6 @@ class MPC(Node):
             try:
                 ox     = np.array(self.opti.debug.value(self.xk[0, :])).flatten()
                 oy     = np.array(self.opti.debug.value(self.xk[1, :])).flatten()
-                ov     = np.array(self.opti.debug.value(self.xk[2, :])).flatten()
                 oyaw   = np.array(self.opti.debug.value(self.xk[3, :])).flatten()
                 oa     = np.array(self.opti.debug.value(self.uk[0, :])).flatten()
                 odelta = np.array(self.opti.debug.value(self.uk[1, :])).flatten()
@@ -1042,9 +1041,9 @@ class MPC(Node):
                 print(f"NMPC status: Best-effort solution used ({e})")
             except Exception as e2:
                 print(f"Error: Cannot solve nmpc.. {e} | debug failed: {e2}")
-                oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
+                oa, odelta, ox, oy, oyaw = None, None, None, None, None
 
-        return oa, odelta, ox, oy, oyaw, ov
+        return oa, odelta, ox, oy, oyaw
     ####################################################################################################
     def mpc_control(self, ref_path, x0):
         """
@@ -1104,3 +1103,4 @@ def main(args=None):
     
 if __name__ == "__main__":
     main()
+#################################################################################################################
