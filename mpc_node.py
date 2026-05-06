@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python3
 import math
 import os
@@ -27,7 +25,7 @@ from visualization_msgs.msg import Marker
 class mpc_config:
     NXK: int = 4  # length of kinematic state vector: z = [x, y, v, yaw]
     NU: int = 2  # length of input vector: u = = [steering speed, acceleration]
-    TK: int = 10  # finite time horizon length kinematic (10 × 0.2 s = 2 s)
+    TK: int = 2 # finite time horizon length kinematic (2 × 0.2 s = 0.4 s)
     k = 1
     
     Rk: list = field(
@@ -97,7 +95,7 @@ def calc_speed_profile(cx, cy, max_speed: float = 5.0, max_accel: float = 3.0, d
         max_accel  : peak accel AND decel [m/s²], must match config.MAX_ACCEL
         ds         : waypoint spacing [m], must match config.dlk 
     """
-    min_speed = max_speed * 0.25 
+    min_speed = max_speed * 0.6
 
     x_ext = np.concatenate((cx[-2:], cx, cx[:2]))
     y_ext = np.concatenate((cy[-2:], cy, cy[:2]))
@@ -105,7 +103,7 @@ def calc_speed_profile(cx, cy, max_speed: float = 5.0, max_accel: float = 3.0, d
     dy  = np.gradient(y_ext, edge_order=2)
     d2x = np.gradient(dx,    edge_order=2)
     d2y = np.gradient(dy,    edge_order=2)
-    denom = (dx**2 + dy**2) ** 1.5
+    denom = (dx**2 + dy**2) ** 1
     denom = np.where(denom < 1e-9, 1e-9, denom)
     kappa = np.abs((dx * d2y - d2x * dy) / denom)[2:-2]
 
@@ -132,7 +130,7 @@ def calc_speed_profile(cx, cy, max_speed: float = 5.0, max_accel: float = 3.0, d
     return sp
 ######################################################################################################
 def wrap_angle(a):
-	"Function to wrap angle argument, a, into the bounds
+    """Wrap angle argument into [-pi, pi]."""
     return np.arctan2(np.sin(a), np.cos(a))
 #######################################################################################################
 
@@ -165,7 +163,7 @@ class MPC(Node):
         self.oa = None          
         self.init_flag = 0      
         self._prev_xk = None    
-		self._prev_uk = None     
+        self._prev_uk = None     
         self._lmpc_solve_ok = False   
 
         #Specifics for path error logging in a CSV file
@@ -192,12 +190,12 @@ class MPC(Node):
         self.traj_marker.action = Marker.ADD
         self.traj_marker.scale.x = 0.05
 
-		# BRIGHT GREEN
+        # BRIGHT GREEN
         self.traj_marker.color.r = 0.0
         self.traj_marker.color.g = 1.0
         self.traj_marker.color.b = 0.0
         self.traj_marker.color.a = 1.0
-		
+        
         self.traj_marker.pose.orientation.w = 1.0
         self.traj_marker.lifetime = Duration(sec=0)
         self.traj_marker.points = []
@@ -205,7 +203,7 @@ class MPC(Node):
         self.last_traj_y = None
 
         # Left wall  = Reference + d_max * normal  (cyan)
-		# Right wall = Reference - d_max * normal  (orange)
+        # Right wall = Reference - d_max * normal  (orange)
         self.corridor_pub_left  = self.create_publisher(Marker, '/ego_racecar/corridor_left',  10)
         self.corridor_pub_right = self.create_publisher(Marker, '/ego_racecar/corridor_right', 10)
 
@@ -227,7 +225,7 @@ class MPC(Node):
         else:
             self._linear_mpc_prob_init()
 
-	################################################################################################################
+    ################################################################################################################
     def visualize_ref_path(self):
         marker = Marker()
         marker.header.frame_id = "ego_racecar/odom"
@@ -266,7 +264,7 @@ class MPC(Node):
             marker.points.append(p)
 
         self.ref_pub.publish(marker)
-	###############################################################################################################
+    ###############################################################################################################
     def load_waypoints(self, path):
 
         data = []
@@ -316,7 +314,7 @@ class MPC(Node):
         wp = np.vstack([wp_x, wp_y, wp_yaw]).T
 
         return wp
-	#####################################################################################################
+    #####################################################################################################
     def pose_callback(self, pose_msg):
         x = pose_msg.pose.pose.position.x
         y = pose_msg.pose.pose.position.y
@@ -410,7 +408,7 @@ class MPC(Node):
                 pass
             return
         steer_output = float(self.odelta_v[0])
-        if getattr(self, '_lmpc_solve_ok', False) and ox is not None:
+        if getattr(self, '_solve_ok', False) and ox is not None:
             speed_output = float(np.clip(ov[1], self.config.MIN_SPEED, self.config.MAX_SPEED))
         else:
             speed_output = float(np.clip(ref_v[self.target_ind], self.config.MIN_SPEED, self.config.MAX_SPEED))
@@ -427,12 +425,12 @@ class MPC(Node):
         except Exception:
             pass
 
-	#######################################################################################################################
+    #######################################################################################################################
     def _publish_corridor_markers(self, ref_traj):
         """Publish cyan (left) and orange (right) corridor-wall LINE_STRIP markers.
         Called every tick regardless of solver mode."""
         T       = self.config.TK
-        d       = getattr(self, '_corridor_d_max', 1.5)
+        d       = getattr(self, '_corridor_d_max', 1)
         normals = np.zeros((2, T + 1))
         origins = np.zeros((2, T + 1))
 
@@ -452,7 +450,7 @@ class MPC(Node):
 
         now   = self.get_clock().now().to_msg()
         frame = "ego_racecar/odom"
-		############################################################################
+        ############################################################################
         def _wall_marker(uid, r, g, b, offset_sign):
             m = Marker()
             m.header.frame_id = frame
@@ -476,118 +474,7 @@ class MPC(Node):
         self.corridor_pub_left.publish( _wall_marker(200, 0.0, 1.0, 1.0,  1))  # cyan
         self.corridor_pub_right.publish(_wall_marker(201, 1.0, 0.5, 0.0, -1))  # orange
 
-    ############################################## LINEAR MPC #########################################
-    def _linear_mpc_prob_init(self):
-        """
-        Create MPC quadratic optimization problem using CasADi Opti stack.
-        Solver: IPOPT (handles convex QP and general NLP alike).
-        A,B,C dynamics matrices are CasADi parameters that are updated on every solve call.
-        """
-        NX = self.config.NXK   # 4  (x, y, v, yaw)
-        NU = self.config.NU    # 2  (accel, steer)
-        T  = self.config.TK    # 4  (horizon steps)
-
-        self.opti = ca.Opti()
-
-        # Decision variables
-        self.xk = self.opti.variable(NX, T + 1)   # predicted states => T+1 states
-        self.uk = self.opti.variable(NU, T)        # control inputs
-
-        # Parameters (values injected each solve call) 
-        self.x0k        = self.opti.parameter(NX)          # initial current state
-        self.ref_traj_k = self.opti.parameter(NX, T + 1)   # reference trajectory T+1 states
-
-        # Linearised dynamics:  vec(x[:,1:]) = Ak @ vec(x[:,:-1]) + Bk @ vec(u) + Ck
-        self.Ak_param = self.opti.parameter(NX * T, NX * T)
-        self.Bk_param = self.opti.parameter(NX * T, NU * T)
-        self.Ck_param = self.opti.parameter(NX * T)
-
-        # Cost weight matrices 
-        R_block  = block_diag([self.config.Rk]  * T).toarray()
-        Rd_block = block_diag([self.config.Rdk] * (T - 1)).toarray()
-        Q_block  = block_diag([self.config.Qk]  * T + [self.config.Qfk]).toarray()
-
-        # Objective 
-        # Input penalty:      u' R u
-        u_vec  = ca.vec(self.uk)                              # (NU*T, 1)
-        obj    = ca.mtimes([u_vec.T, R_block,  u_vec])
-
-        # Tracking penalty:   (x - x_ref)' Q (x - x_ref)
-        x_err  = ca.vec(self.xk - self.ref_traj_k)           # (NX*(T+1), 1)
-        obj   += ca.mtimes([x_err.T, Q_block, x_err])
-
-        # Input-rate penalty: Δu' Rd Δu
-        du     = ca.vec(self.uk[:, 1:] - self.uk[:, :-1])    # (NU*(T-1), 1)
-        obj   += ca.mtimes([du.T, Rd_block, du])
-
-        self.opti.minimize(obj)
-        self.path_normals_lk = self.opti.parameter(2, T + 1)
-        self.path_origins_lk = self.opti.parameter(2, T + 1)
-
-        # Constraints 
-        # Linearised dynamics over horizon
-        x_next = ca.vec(self.xk[:, 1:])    # (NX*T, 1)
-        x_curr = ca.vec(self.xk[:, :-1])   # (NX*T, 1)
-        u_flat = ca.vec(self.uk)            # (NU*T, 1)
-        self.opti.subject_to(
-            x_next == ca.mtimes(self.Ak_param, x_curr)
-                    + ca.mtimes(self.Bk_param, u_flat)
-                    + self.Ck_param
-        )
-
-        # Accel rate limit
-        self.opti.subject_to(
-            ca.fabs(self.uk[0, 1:] - self.uk[0, :-1]) <= 5.0
-        )
-
-        # Steering rate limit
-        self.opti.subject_to(
-            ca.fabs(self.uk[1, 1:] - self.uk[1, :-1])
-            <= self.config.MAX_DSTEER * self.config.DTK
-        )
-
-        # Initial state pin
-        self.opti.subject_to(self.xk[:, 0] == self.x0k)
-
-        # Speed bounds on all horizon steps
-        self.opti.subject_to(self.xk[2, :] >= self.config.MIN_SPEED)
-        self.opti.subject_to(self.xk[2, :] <= self.config.MAX_SPEED)
-
-        # Input magnitude bounds
-        self.opti.subject_to(ca.fabs(self.uk[0, :]) <= self.config.MAX_ACCEL)
-        self.opti.subject_to(ca.fabs(self.uk[1, :]) <= self.config.MAX_STEER)
-
-        # 7) Linear lateral corridor constraints 
-        # For each horizon step t, the predicted position p_t = (x_t, y_t)
-        # must lie within MAX_LATERAL_DEV of the reference point along the
-        # direction perpendicular to the path tangent.
-        
-        #   n_t' * (p_t - p_ref_t)  <=  MAX_LATERAL_DEV    (left wall)
-        #  -n_t' * (p_t - p_ref_t)  <=  MAX_LATERAL_DEV    (right wall)       
-        D_MAX = 1.5        # [m]  half-width of the lateral corridor 
-        self._corridor_d_max = D_MAX   # store for marker publishing
-        
-        for t in range(1, T + 1):
-            n    = self.path_normals_lk[:, t]          # (2,) symbolic column
-            p    = self.xk[:2, t]                      # (2,) predicted [x, y]
-            p_r  = self.path_origins_lk[:, t]          # (2,) reference [x, y]
-            lat  = ca.dot(n, p - p_r)                  # signed lateral error
-            self.opti.subject_to( lat <=  D_MAX)       # left  wall
-            self.opti.subject_to(-lat <=  D_MAX)       # right wall
-
-        
-        solver_opts = {
-            'ipopt.print_level':           0,
-            'ipopt.max_iter':              200,
-            'ipopt.max_cpu_time':          0.6,    
-            'ipopt.tol':                   1e-3,
-            'ipopt.acceptable_tol':        1e-2,
-            'ipopt.acceptable_iter':       5,
-            'ipopt.warm_start_init_point': 'yes',
-            'print_time':                  0,
-        }
-        self.opti.solver('ipopt', solver_opts)
-	#############################################################################################
+    #############################################################################################
     def calc_ref_trajectory(self, state, cx, cy, cyaw, sp):
         """
         calc. reference trajectory, ref_traj in T steps: [x, y, v, yaw]
@@ -680,7 +567,7 @@ class MPC(Node):
 
         return path_predict
 
-
+    ##############################################################################################
     def update_state(self, state, a, delta):
 
         # input check
@@ -734,7 +621,117 @@ class MPC(Node):
         C[3] = -self.config.DTK * v * delta / (self.config.WB * math.cos(delta) ** 2)
 
         return A, B, C
+    ############################################## LINEAR MPC #########################################
+    def _linear_mpc_prob_init(self):
+        """
+        Create MPC quadratic optimization problem using CasADi Opti stack.
+        Solver: IPOPT (handles convex QP and general NLP alike).
+        A,B,C dynamics matrices are CasADi parameters that are updated on every solve call.
+        """
+        NX = self.config.NXK   # 4  (x, y, v, yaw)
+        NU = self.config.NU    # 2  (accel, steer)
+        T  = self.config.TK    # 4  (horizon steps)
 
+        self.opti = ca.Opti()
+
+        # Decision variables
+        self.xk = self.opti.variable(NX, T + 1)   # predicted states => T+1 states
+        self.uk = self.opti.variable(NU, T)        # control inputs
+
+        # Parameters (values injected each solve call) 
+        self.x0k        = self.opti.parameter(NX)          # initial current state
+        self.ref_traj_k = self.opti.parameter(NX, T + 1)   # reference trajectory T+1 states
+
+        # Linearised dynamics:  vec(x[:,1:]) = Ak @ vec(x[:,:-1]) + Bk @ vec(u) + Ck
+        self.Ak_param = self.opti.parameter(NX * T, NX * T)
+        self.Bk_param = self.opti.parameter(NX * T, NU * T)
+        self.Ck_param = self.opti.parameter(NX * T)
+
+        # Cost weight matrices 
+        R_block  = block_diag([self.config.Rk]  * T).toarray()
+        Rd_block = block_diag([self.config.Rdk] * (T - 1)).toarray()
+        Q_block  = block_diag([self.config.Qk]  * T + [self.config.Qfk]).toarray()
+
+        # Objective 
+        # Input penalty:      u' R u
+        u_vec  = ca.vec(self.uk)                              # (NU*T, 1)
+        obj    = ca.mtimes([u_vec.T, R_block,  u_vec])
+
+        # Tracking penalty:   (x - x_ref)' Q (x - x_ref)
+        x_err  = ca.vec(self.xk - self.ref_traj_k)           # (NX*(T+1), 1)
+        obj   += ca.mtimes([x_err.T, Q_block, x_err])
+
+        # Input-rate penalty: Δu' Rd Δu
+        du     = ca.vec(self.uk[:, 1:] - self.uk[:, :-1])    # (NU*(T-1), 1)
+        obj   += ca.mtimes([du.T, Rd_block, du])
+
+        self.opti.minimize(obj)
+        self.path_normals_lk = self.opti.parameter(2, T + 1)
+        self.path_origins_lk = self.opti.parameter(2, T + 1)
+
+        # Constraints 
+        # Linearised dynamics over horizon
+        x_next = ca.vec(self.xk[:, 1:])    # (NX*T, 1)
+        x_curr = ca.vec(self.xk[:, :-1])   # (NX*T, 1)
+        u_flat = ca.vec(self.uk)            # (NU*T, 1)
+        self.opti.subject_to(
+            x_next == ca.mtimes(self.Ak_param, x_curr)
+                    + ca.mtimes(self.Bk_param, u_flat)
+                    + self.Ck_param
+        )
+
+        # Accel rate limit
+        self.opti.subject_to(
+            ca.fabs(self.uk[0, 1:] - self.uk[0, :-1]) <= 5.0
+        )
+
+        # Steering rate limit
+        self.opti.subject_to(
+            ca.fabs(self.uk[1, 1:] - self.uk[1, :-1])
+            <= self.config.MAX_DSTEER * self.config.DTK
+        )
+
+        # Initial state pin
+        self.opti.subject_to(self.xk[:, 0] == self.x0k)
+
+        # Speed bounds on all horizon steps
+        self.opti.subject_to(self.xk[2, :] >= self.config.MIN_SPEED)
+        self.opti.subject_to(self.xk[2, :] <= self.config.MAX_SPEED)
+
+        # Input magnitude bounds
+        self.opti.subject_to(ca.fabs(self.uk[0, :]) <= self.config.MAX_ACCEL)
+        self.opti.subject_to(ca.fabs(self.uk[1, :]) <= self.config.MAX_STEER)
+
+        # 7) Linear lateral corridor constraints 
+        # For each horizon step t, the predicted position p_t = (x_t, y_t)
+        # must lie within MAX_LATERAL_DEV of the reference point along the
+        # direction perpendicular to the path tangent.
+        
+        #   n_t' * (p_t - p_ref_t)  <=  MAX_LATERAL_DEV    (left wall)
+        #  -n_t' * (p_t - p_ref_t)  <=  MAX_LATERAL_DEV    (right wall)       
+        D_MAX = 1        # [m]  half-width of the lateral corridor 
+        self._corridor_d_max = D_MAX   # store for marker publishing
+        
+        for t in range(1, T + 1):
+            n    = self.path_normals_lk[:, t]          # (2,) symbolic column
+            p    = self.xk[:2, t]                      # (2,) predicted [x, y]
+            p_r  = self.path_origins_lk[:, t]          # (2,) reference [x, y]
+            lat  = ca.dot(n, p - p_r)                  # signed lateral error
+            self.opti.subject_to( lat <=  D_MAX)       # left  wall
+            self.opti.subject_to(-lat <=  D_MAX)       # right wall
+
+        
+        solver_opts = {
+            'ipopt.print_level':           0,
+            'ipopt.max_iter':              200,
+            'ipopt.max_cpu_time':          0.6,    
+            'ipopt.tol':                   1e-3,
+            'ipopt.acceptable_tol':        1e-2,
+            'ipopt.acceptable_iter':       5,
+            'ipopt.warm_start_init_point': 'yes',
+            'print_time':                  0,
+        }
+        self.opti.solver('ipopt', solver_opts)
     ##################################################################################################
     def _linear_mpc_prob_solve(self, ref_traj, path_predict, x0):
         # Update current-state parameter
@@ -771,7 +768,7 @@ class MPC(Node):
         now          = self.get_clock().now().to_msg()
         frame        = "ego_racecar/odom"
         d            = self._corridor_d_max
-		#############################################################################################
+        #############################################################################################
         def _wall_marker(uid, r, g, b, offset_sign):
             m = Marker()
             m.header.frame_id = frame
@@ -853,6 +850,7 @@ class MPC(Node):
             self._prev_xk = np.array(sol.value(self.xk))
             self._prev_uk = np.array(sol.value(self.uk))
             self._lmpc_solve_ok = True
+            self._solve_ok = True
             print("LMPC status: Solved")
         except Exception as e:
             self._lmpc_solve_ok = False
@@ -987,7 +985,7 @@ class MPC(Node):
             'print_time':                  0,
         }
         self.opti.solver('ipopt', solver_opts)
-	############################################################################################
+    ############################################################################################
     def nmpc_prob_solve(self, ref_traj, x0):
         """
         Solve the Non linear MPC via CasADi's automatic differentiation.
@@ -997,7 +995,7 @@ class MPC(Node):
         # Yaw reference wrapping
         ref_traj[3, :] = x0[3] + wrap_angle(ref_traj[3, :] - x0[3])
         
-		for i in range(1, ref_traj.shape[1]):
+        for i in range(1, ref_traj.shape[1]):
             d = ref_traj[3, i] - ref_traj[3, i - 1]
             if d >  np.pi: ref_traj[3, i] -= 2 * np.pi
             if d < -np.pi: ref_traj[3, i] += 2 * np.pi
@@ -1028,6 +1026,7 @@ class MPC(Node):
             odelta = np.array(sol.value(self.uk[1, :])).flatten()
             self._prev_xk = np.array(sol.value(self.xk))
             self._prev_uk = np.array(sol.value(self.uk))
+            self._solve_ok = True
             print("NMPC status: Solved")
         except Exception as e:
             # On timeout or acceptable-level convergence, recover last iterate
@@ -1046,7 +1045,7 @@ class MPC(Node):
                 oa, odelta, ox, oy, oyaw, ov = None, None, None, None, None, None
 
         return oa, odelta, ox, oy, oyaw, ov
-	####################################################################################################
+    ####################################################################################################
     def mpc_control(self, ref_path, x0):
         """
         Nonlinear MPC entry point. Solves the full Non-linear problem over the horizon.
@@ -1063,7 +1062,7 @@ class MPC(Node):
         cy   = self.waypoints[ind, 1]
         cyaw = self.waypoints[ind, 2]
 
-        cte      = ca.fabs(-(state.x - cx) * math.sin(cyaw) + (state.y - cy) * math.cos(cyaw))
+        cte      = math.fabs(-(state.x - cx) * math.sin(cyaw) + (state.y - cy) * math.cos(cyaw))
         yaw_diff = wrap_angle(state.yaw - float(intended_yaw))
 
         self._csv_writer.writerow([
@@ -1081,7 +1080,7 @@ class MPC(Node):
             round(yaw_diff,            4),
         ])
         self._csv_file.flush()
-	#########################################################################################################
+    #########################################################################################################
     def destroy_node(self):
         try:
             self._csv_file.flush()
@@ -1105,4 +1104,3 @@ def main(args=None):
     
 if __name__ == "__main__":
     main()
-
