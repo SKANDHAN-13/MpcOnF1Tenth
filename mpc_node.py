@@ -133,8 +133,6 @@ def wrap_angle(a):
     """Wrap angle argument into [-pi, pi]."""
     return np.arctan2(np.sin(a), np.cos(a))
 #######################################################################################################
-
-
 class MPC(Node):
     def __init__(self):
         super().__init__('mpc_node')
@@ -211,7 +209,7 @@ class MPC(Node):
         self._csv_path = os.path.join(os.getcwd(), f'{solver_label}_casadi_performance.csv')
         self._csv_file = open(self._csv_path, 'w', newline='')
         self._csv_writer = csv.writer(self._csv_file)
-        self._csv_writer.writerow(['time_s', 'label', 'x', 'y', 'v', 'yaw', 'cte', 'abs_cte', 'ref_x', 'ref_y', 'ref_v', 'yaw_diff'])
+        self._csv_writer.writerow(['time_s', 'label', 'x', 'y', 'v', 'yaw', 'cte', 'ref_x', 'ref_y', 'ref_v', 'yaw_diff'])
         self._csv_file.flush()
         self.get_logger().info(f'Logging {solver_label.upper()} performance to: {self._csv_path}')
 
@@ -1067,7 +1065,6 @@ class MPC(Node):
             round(state.y,   4),
             round(state.v,   4),
             round(state.yaw, 4),
-            round(cte,       4),
             round(abs(cte),  4),
             round(float(intended_x),   4),
             round(float(intended_y),   4),
