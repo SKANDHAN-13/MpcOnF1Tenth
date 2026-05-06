@@ -25,7 +25,7 @@ from visualization_msgs.msg import Marker
 class mpc_config:
     NXK: int = 4  # length of kinematic state vector: z = [x, y, v, yaw]
     NU: int = 2  # length of input vector: u = = [steering speed, acceleration]
-    TK: int = 2 # finite time horizon length kinematic (2 x 0.2 s = 0.4 s)
+    TK: int = 2 # finite time horizon length kinematic (2 × 0.2 s = 0.4 s)
     
     
     Rk: list = field(
@@ -212,7 +212,7 @@ class MPC(Node):
 
         
         solver_label = 'nmpc' if self.USE_NMPC else 'lmpc'
-        self._csv_path = os.path.join(os.getcwd(), f'{solver_label}_performance.csv')
+        self._csv_path = os.path.join(os.getcwd(), f'{solver_label}_casadi_performance.csv')
         self._csv_file = open(self._csv_path, 'w', newline='')
         self._csv_writer = csv.writer(self._csv_file)
         self._csv_writer.writerow(['time_s', 'label', 'x', 'y', 'v', 'yaw', 'cte', 'abs_cte', 'ref_x', 'ref_y', 'ref_v', 'yaw_diff'])
