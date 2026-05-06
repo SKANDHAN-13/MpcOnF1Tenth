@@ -136,10 +136,6 @@ def wrap_angle(a):
 
 
 class MPC(Node):
-    """ 
-    Implement Kinematic MPC on the car
-    This is just a template, you are free to implement your own node!
-    """
     def __init__(self):
         super().__init__('mpc_node')
     
