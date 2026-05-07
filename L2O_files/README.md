@@ -6,7 +6,7 @@
 pip install f1tenth-gym casadi scipy imageio pillow
 ```
 
-[![Google Colaboratory](https://img.shields.io/badge/Colab%2B-blue)](https://colab.research.google.com/drive/19uFirhiSCK8sSTIBBFCdwYT9NJ3Batkd?authuser=1#scrollTo=jTXBJnhzrRGU): Implementation of a pure-Python and F1Tenth Gym that formulates a receding-horizon optimal
+[![Google Colaboratory](https://img.shields.io/badge/Colab%2B-blue)](https://colab.research.google.com/drive/19uFirhiSCK8sSTIBBFCdwYT9NJ3Batkd?authuser=1#scrollTo=jTXBJnhzrRGU): Implementation of a Python and F1Tenth Gym that formulates a receding-horizon optimal
 control problem with track-corridorconstraints and solves it online using
 [CasADi](https://web.casadi.org/) + IPOPT at every control interval.
 
