@@ -13,7 +13,7 @@ All controllers here assume a **kinematic bicycle** model.
 **Non-linear and Linear MPC (CasADi + IPOPT) with linear corridor visualization**
 
 A dual-mode MPC controller implemented with CasADi.
-
+![demo](./Casadi-NonLinear.gif)
 - **Subscribes:** `/ego_racecar/odom` (`nav_msgs/Odometry`)
 - **Publishes:** `/drive` (`ackermann_msgs/AckermannDriveStamped`)
 
@@ -106,7 +106,7 @@ where $p_t = [x_t, y_t]$ and $n_t$ is the left-pointing unit normal.
 **Linear MPC using OSQP with hard corridor constraints, and a Non-linear MPC using SLSQP with corridor penalty**
 
 A linear MPC controller solved as a sparse QP using OSQP.
-
+![demo](./CVXPY-NonLinear.gif)
 - **Subscribes:** `/ego_racecar/odom`
 - **Publishes:** `/drive`
 
@@ -162,7 +162,7 @@ $$
 **Linear MPC (OSQP)**
 
 A linear MPC baseline using OSQP.
-
+![demo](./CVXPY-Linear.gif)
 #### Model:
 - State: $[x, y, v, yaw]$
 - Control: $[a, \delta]$
