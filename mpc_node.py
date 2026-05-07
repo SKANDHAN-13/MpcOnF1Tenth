@@ -595,7 +595,7 @@ class MPC(Node):
         Calculate linear and discrete time dynamic model
         """
 
-        # State (or system) matrix A, 4x4
+        # State matrix A, 4x4
         A = np.zeros((self.config.NXK, self.config.NXK))
         A[0, 0] = 1.0
         A[1, 1] = 1.0
@@ -675,11 +675,6 @@ class MPC(Node):
             x_next == ca.mtimes(self.Ak_param, x_curr)
                     + ca.mtimes(self.Bk_param, u_flat)
                     + self.Ck_param
-        )
-
-        # Accel rate limit
-        self.opti.subject_to(
-            ca.fabs(self.uk[0, 1:] - self.uk[0, :-1]) <= 5.0
         )
 
         # Steering rate limit
@@ -945,11 +940,6 @@ class MPC(Node):
                 x_t[3] + (x_t[2] / WB) * ca.tan(u_t[1]) * dt,   # yaw
             )
             self.opti.subject_to(self.xk[:, t + 1] == x_next)
-
-        #Accel rate limit
-        self.opti.subject_to(
-            ca.fabs(self.uk[0, 1:] - self.uk[0, :-1]) <= 5.0
-        )
 
         #Steering rate limit
         self.opti.subject_to(
