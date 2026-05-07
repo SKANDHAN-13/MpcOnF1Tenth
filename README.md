@@ -194,7 +194,7 @@ All controllers use a CSV file:
 ## Workflow:
 
 1. Add the controller files inside the scripts directory inside the mpc folder of F1tenth. Start your virtual environment.
-2. Launch the F1TENTH gym bridge for ROS2 to control the ego-vehicle simulation on a Foxglove window.
+2. Launch the F1TENTH gym bridge for ROS2 (through instructions on the dev-humble branch of F1Tenth gym ROS) to simulate the ego-vehicle on a Foxglove window.
 3. Once the simulator is up and running, in another terminal, source the virtual environment and ROS2. Then you run the controller:
 
 ```bash
