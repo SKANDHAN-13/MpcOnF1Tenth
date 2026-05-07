@@ -858,7 +858,7 @@ class MPC(Node):
                 self._prev_uk = np.array(self.opti.debug.value(self.uk))
                 print(f"LMPC status: best-effort iterate used ({e})")
             except Exception as e2:
-                print(f"LMPC: debug fallback failed ({e2}) — holding previous output")
+                print(f"LMPC: debug fallback failed ({e2}), holding previous output")
                 # oa / odelta already set to carry-forward values above
 
         return oa, odelta, ox, oy, oyaw
@@ -1087,3 +1087,6 @@ def main(args=None):
 if __name__ == "__main__":
     main()
 #################################################################################################################
+
+"""
+"""
