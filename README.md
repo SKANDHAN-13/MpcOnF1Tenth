@@ -5,125 +5,181 @@ The nodes subscribe to the car state (odometry), track a waypoint-defined racing
 
 ---
 
-All controllers here assume a **kinematic bicycle** model with:
+All controllers here assume a **kinematic bicycle** model.
+---
+## MPC Controllers:
 
-**State**
-- `x` = global x position [m]  
-- `y` = global y position [m]  
-- `v` = speed [m/s]  
-- `yaw` (ψ) = heading angle [rad]  
+### 1. `mpc_linear_bordered_casadi.py`
+**Non-linear and Linear MPC (CasADi + IPOPT) with linear corridor visualization**
 
-So the state vector is:
+A dual-mode MPC controller implemented with CasADi.
 
-- **x = [x, y, v, yaw]ᵀ**
+- **Subscribes:** `/ego_racecar/odom` (`nav_msgs/Odometry`)
+- **Publishes:** `/drive` (`ackermann_msgs/AckermannDriveStamped`)
 
-**Inputs**
-- `a` = acceleration [m/s²]
-- `delta` (δ) = steering angle [rad]
+- **State:** $[x, y, v, yaw]$
+- **Control:** $[a, \delta]$ (acceleration, steering angle)
+- **Horizon:** `TK = 2` steps with `DTK = 0.2 s` (≈ `0.4 s` total horizon)
 
-So the input vector is:
+#### Cost Structure:
+- **State tracking penalty:**
 
-- **u = [a, delta]ᵀ**
+$$
+(x - x_{\text{ref}})^T Q (x - x_{\text{ref}})
+$$
 
-**Constants**
-- `WB` = WheelBase L [m] (from `mpc_config.WB`)
-- `DTK` = Time-step Δt [s] (from `mpc_config.DTK`)
+with terminal cost $Q_f$
+
+- **Input magnitude penalty:**
+
+$$
+u^T R u
+$$
+
+- **Input rate penalty:**
+
+$$
+\Delta u^T R_d \Delta u
+$$
+
+
+#### Modes:
+
+##### NMPC (`USE_NMPC=True`)
+- Nonlinear kinematic bicycle rollout enforced as equality constraints:
+
+$$
+x_{t+1} = f(x_t, u_t)
+$$
+
+- Solver: **IPOPT via CasADi Opti**
+- Warm-start: Shifts the previous $(x, u)$ solution forward one step each tick
+- If the solve fails, it attempts to use the **last IPOPT iterate** (`opti.debug.value(...)`) as a best-effort fallback
+
+##### LMPC (`USE_NMPC=False`)
+- Dynamics are linearized each tick into:
+
+$$
+x_{t+1} \approx A_t x_t + B_t u_t + C_t
+$$
+
+- The optimization is still built and solved with **CasADi Opti + IPOPT**
+- Warm-start: Shifts the previously solved $(x, u)$ trajectory forward
+
+#### Reference Generation:
+- Waypoints are loaded from `waypoints.csv`, with:
+  - Yaw unwrapping for continuity
+  - Loop-closure bridging if the last-to-first waypoint gap is large
+  - Resampling to uniform spacing (`dlk = 0.03 m`)
+
+- Speed reference comes from `calc_speed_profile()`:
+  - Curvature-based speed scaling
+  - Forward - Backward acceleration passes to avoid impossible step drops in speed at corner entry
+
+#### Border Visualization:
+- The node publishes corridor wall markers computed from the reference path tangent normals:
+  - `/ego_racecar/corridor_left`
+  - `/ego_racecar/corridor_right`
+
+- Corridor half-width:
+  - `D_MAX = 1.0 m` (stored as `_corridor_d_max`)
+
+- In the CasADi LMPC path, the corridor is implemented as a **hard linear constraint** at each horizon step $t \ge 1$:
+
+$$
+n_t \cdot (p_t - p_t^{\text{ref}}) \le D_{\max}
+$$
+
+$$
+-n_t \cdot (p_t - p_t^{\text{ref}}) \le D_{\max}
+$$
+
+where $p_t = [x_t, y_t]$ and $n_t$ is the left-pointing unit normal.
+
+#### Logging data into:
+- `nmpc_casadi_performance.csv` if `USE_NMPC=True`
+- `lmpc_casadi_performance.csv` if `USE_NMPC=False`
 
 ---
 
-## Nonlinear discrete-time update used in the scripts:
-- **x_next   = x   + v * cos(yaw) * DTK**
-- **y_next   = y   + v * sin(yaw) * DTK**
-- **v_next   = v   + a * DTK**
-- **yaw_next = yaw + (v / WB) * tan(delta) * DTK**
+### 2. `mpc_linear_bordered_cvxpy.py`
+**Linear MPC using OSQP with hard corridor constraints, and a Non-linear MPC using SLSQP with corridor penalty**
+
+A linear MPC controller solved as a sparse QP using OSQP.
+
+- **Subscribes:** `/ego_racecar/odom`
+- **Publishes:** `/drive`
+
+#### Linear MPC (`USE_NMPC=False`):
+- State: $[x, y, v, yaw]$
+- Control: $[a, \delta]$
+
+- Sparse QP form:
+
+$$
+\min \frac{1}{2} z^T P z + q^T z \quad \text{s.t. } l \le A z \le u
+$$
+
+with decision vector:
+
+$$
+z = [x_0, \dots, x_T, u_0, \dots, u_{T-1}]
+$$
+
+#### Constraints:
+- Initial state equality $x_0 = x_{\text{current}}$
+- Linearized dynamics equalities
+- Speed bounds, acceleration bounds, steering bounds
+- Steering-rate based bounds $|\delta_{t+1} - \delta_t| \le \dot{\delta}_{\max} DT$
+- **Hard corridor constraint** for $t = 1, \dots, T$:
+
+$$
+-D_{\max} + n_t^T p_t^{\text{ref}} \le n_t^T p_t \le D_{\max} + n_t^T p_t^{\text{ref}}
+$$
+
+- Corridor half-width: `D_MAX = 1.0 m`
+
+#### Warm Start:
+- Shifts the previous $x, u$ solution forward each tick
+- Reuses OSQP dual multipliers (`res.y`) when dimensions match
+
+#### Non-linear MPC (`USE_NMPC=True`):
+- Implemented with `scipy.optimize.minimize(..., method='SLSQP')`
+- Non-linear dynamics equality constraints
+- **Soft corridor enforcement** via a quadratic hinge penalty:
+
+$$
+W_{\text{cor}} \max\left(0, \left|n_t^T p_t - n_t^T p_t^{\text{ref}}\right| - D_{\max}\right)^2
+$$
+
+#### Logging data into:
+- `lmpc_cvxpy_performance.csv`
+- `nmpc_cvxpy_performance.csv`
 
 ---
 
-## Linearized model used in the linear MPC solvers:
+### 3. `mpc_linear_cvxpy.py`
+**Linear MPC (OSQP)**
 
-The “linear MPC” versions approximate the nonlinear model around an operating point:
-- `v` = operating speed
-- `phi` (φ) = operating yaw
+A linear MPC baseline using OSQP.
 
-Then they use :
-- **x_next ≈ A * x + B * u + C**
-where:
-- `x = [x, y, v, yaw]ᵀ`
-- `u = [a, delta]ᵀ`
+#### Model:
+- State: $[x, y, v, yaw]$
+- Control: $[a, \delta]$
+- Horizon: `TK = 4`, `DTK = 0.1 s`
 
-#### A matrix (4×4)
-- A[0,0], A[1,1], A[2,2], A[3,3] = 1 , and they carry the current state forward.
-- A[0,2] = DTK * cos(phi)  
-- A[0,3] = -DTK * v * sin(phi)  
-- A[1,2] = DTK * sin(phi)  
-- A[1,3] =  DTK * v * cos(phi)  
-- A[3,2] = DTK * tan(delta_bar) / WB  
+#### Constraints:
+- Initial state equality
+- Linearized dynamics equalities
+- Speed bounds, acceleration bounds, steering bounds
+- Steering-rate based bounds
 
+#### Warm Start:
+- Shifts the previous solution forward
+- Stores previous dual multipliers when available
 
-#### B matrix (4×2)
-This captures how inputs affect the next state:
-- B[2,0] = DTK  
-- B[3,1] = DTK * v / (WB * cos(delta_bar)^2)  
-
-So:
-- acceleration `a` only affects `v_next`
-- steering `delta` only affects `yaw_next` (in the linearized model)
-
-#### C vector (4×1)
-This is the affine correction (the “constant offset” term):
-- C[0] =  DTK * v * sin(phi) * phi
-- C[1] = -DTK * v * cos(phi) * phi
-- C[2] =  0
-- C[3] = -DTK * v * delta_bar / (WB * cos(delta_bar)^2)
-
-Thus C vector helps compensate for linearization error terms.
-
----
-
-## MPC controllers :
-
-### 1) `mpc_node.py` - Nonlinear MPC (NMPC) with CasADi + IPOPT
-
-This version solves a **nonlinear** optimization problem with the nonlinear dynamics constraints shown above:
-
-- State: `[x, y, v, yaw]`
-- Control: `[a, delta]`
-- Solver: IPOPT through CasADi `Opti`
-- Warm-starting: shifts previous solution forward each tick
-- Logs performance: `nmpc_performance.csv`
-- RViz markers:
-  - `/ego_racecar/mpc_ref_traj`
-  - `/ego_racecar/driven_traj`
-  - 
-Note: The script also has a functionality to switch to linear MPC using CasADi + IPOPT
-
-### 2) `mpc_node_cvxpympc.py` - Linear MPC as a QP (CVXPY + OSQP)
-
-This one solves a **QP**:
-
-- Uses the linearized model `x_next ≈ A x + B u + C`
-- Solver: OSQP through CVXPY
-- Also uses the same waypoint reference trajectory generation as in the mpc_node.py
-
-### 3) `mpc_casadiLinearConst.py` - Linear MPC with CasADi + IPOPT + corridor constraints
-
-This is a linearized MPC but solved with CasADi/IPOPT, and adds a lateral corridor constraint around the path:
-
-At each horizon step `t` it computes:
-- `p_t = [x_t, y_t]`
-- `p_ref_t = [x_ref_t, y_ref_t]`
-- `n_t` : A unit normal vector pointing left of the path tangent
-
-and then enforces:
-
-- **n_t · (p_t - p_ref_t) ≤ d_max**
-- **- n_t · (p_t - p_ref_t) ≤ d_max**
-
-- `d_max = 0.3 m` in the script.
-
-It also publishes corridor markers:
-- `/ego_racecar/corridor_left`
-- `/ego_racecar/corridor_right`
+#### Logging:
+- `lmpc_performance.csv`
 
 ---
 
@@ -139,12 +195,12 @@ All controllers use a CSV file:
 
 1. Add the controller files inside the scripts directory inside the mpc folder of F1tenth. Start your virtual environment.
 2. Launch the F1TENTH gym bridge for ROS2 to control the ego-vehicle simulation on a Foxglove window.
-3. In another terminal, run the controller:
+3. Once the simulator is up and running, in another terminal, source the virtual environment and ROS2. Then you run the controller:
 
 ```bash
-ros2 run mpc mpc_node.py
+ros2 run mpc mpc_linear_bordered_casadi.py
 # or
-ros2 run mpc mpc_node_cvxpympc.py
+ros2 run mpc mpc_linear_bordered_cvxpy.py
 # or
-ros2 run mpc mpc_casadiLinearConst.py
+ros2 run mpc mpc_linear_cvxpy.py
 ```
